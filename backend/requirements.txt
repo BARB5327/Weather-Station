@@ -1,0 +1,12 @@
+Flask
+google-cloud-bigquery
+google-cloud-texttospeech
+requests
+pandas
+numpy
+pillow
+vertexai
+geocoder
+matplotlib
+ntplib
+werkzeug

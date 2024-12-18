@@ -1,0 +1,489 @@
+from m5stack import *
+from m5stack_ui import *
+from uiflow import *
+import urequests
+import base64
+import network
+import urequests as requests
+from m5ui import setScreenColor
+from libs.image_plus import *
+import unit
+import time
+import gc
+
+# Screen configuration
+screen = M5Screen()
+setScreenColor(0x000080)  # Couleur de fond gris foncé
+writing_color = 0xFFFFFF
+server_url = "https://weather-backend-23-tq2avlclea-oa.a.run.app"
+
+# Server URLapi
+upload_data = server_url + "/upload"
+get_api_data = server_url + "/weather_geoloc"
+download_url = server_url + "/download_image"
+get_date_url = server_url + "/get_time"
+get_forecast_url = server_url + "/forecast"
+audio_url = server_url + "/download_audio"
+
+sensor_data_cache = []
+
+# Network configuration
+wifi_networks = [
+    {'ssid': 'OPPO Reno4 Pro 5G', 'password': '123456789'},
+    {'ssid': 'nkb-72826', 'password': '9QS8-ss4K-efNr-CrAs'},
+    {'ssid': 'iot-unil', 'password': '4u6uch4hpY9pJ2f9'}
+]
+
+wlan = network.WLAN(network.STA_IF)
+wlan.active(True)
+
+def connect_to_wifi():
+    for network in wifi_networks:
+        ssid = network['ssid']
+        password = network['password']
+        wlan.connect(ssid, password)
+
+        timeout = 10
+        while not wlan.isconnected() and timeout > 0:
+            lcd.clear()
+            lcd.setCursor(0, 0)
+            lcd.print('Connecting to ' + ssid + '...')
+            time.sleep(1)
+            timeout -= 1
+
+        if wlan.isconnected():
+            lcd.clear()
+            lcd.print('Connected to ' + ssid + ' !')
+            return True
+        else:
+            lcd.clear()
+            lcd.print('Failed to connect to ' + ssid + '. Trying next...')
+            time.sleep(1)
+
+    lcd.clear()
+    lcd.print('Failed to connect to any WiFi network.')
+    return False
+
+def reconnect_to_wifi():
+    lcd.clear()
+    lcd.print("Reconnecting to WiFi...", 0, 0)
+    for network in wifi_networks:
+        ssid = network['ssid']
+        password = network['password']
+        wlan.connect(ssid, password)
+
+        timeout = 10
+        while not wlan.isconnected() and timeout > 0:
+            lcd.clear()
+            lcd.setCursor(0, 0)
+            lcd.print('Connecting to ' + ssid + '...')
+            time.sleep(1)
+            timeout -= 1
+
+        if wlan.isconnected():
+            lcd.clear()
+            lcd.print('Connected to ' + ssid + ' !')
+            return True
+        else:
+            lcd.clear()
+            lcd.print('Failed to connect to ' + ssid + '. Trying next...')
+            time.sleep(1)
+    lcd.setCursor(0,150)
+    lcd.print('Failed to connect to any WiFi network.', 0, 60)
+    time.sleep(15)
+    lcd.setCursor(0,190)
+    lcd.print("Verify the availability of your wifi network")
+    return False
+
+def check_wifi_connection():
+    if not wlan.isconnected():
+        lcd.clear()
+        lcd.print("WiFi connection lost!", 0, 0)
+        if reconnect_to_wifi():
+            page1()
+
+
+# Sensors configuration
+env3 = unit.get(unit.ENV3, unit.PORTA)
+co2_sensor = unit.get(unit.TVOC, unit.PORTC)
+pir = machine.Pin(36, machine.Pin.IN)
+
+# Light for air quality
+def set_led_color():
+    co2_level = co2_sensor.eCO2
+    if co2_level < 500:
+        # Green
+        rgb.setColorFrom(6, 10, 0x00ff00)
+        rgb.setColorFrom(1, 5, 0x00ff00)
+    elif co2_level > 500:
+        # Red
+        rgb.setColorFrom(6, 10, 0xff0000)
+        rgb.setColorFrom(1, 5, 0xff0000)
+    else:
+        # Green
+        rgb.setColorFrom(6, 10, 0x00ff00)
+        rgb.setColorFrom(1, 5, 0x00ff00)
+
+# NTP date
+def get_date():
+    try:
+        response = urequests.get(get_date_url)
+        if response.status_code == 200:
+            data = response.json()
+            lcd.font(lcd.FONT_Default)
+            lcd.setTextColor(writing_color)
+            lcd.setCursor(45, 10)
+            lcd.print(data['time'])
+        else:
+            return "Error: " + str(response.status_code)
+    except Exception as e:
+        return "Date not available"
+
+# Weather information for the page 2 (inside,outside)
+def download_thermo_house(image_name):
+    url = download_url + "?image_name=" + image_name
+    try:
+        response = urequests.get(url)
+        if response.status_code == 200:
+            image_data_base64 = response.json().get('image_data')
+            if image_data_base64:
+                print('Image successfully downloaded.')
+                image_data = base64.b64decode(image_data_base64)
+                lcd.image(0, 47, image_data)
+            else:
+                print('No image data received.')
+        else:
+            print('Image download failed. Response status : ' + str(response.status_code))
+    except Exception as e:
+        print('Failed to download image:', e)
+
+def download_co2(image_name):
+    url = download_url + "?image_name=" + image_name
+    try:
+        response = urequests.get(url)
+        if response.status_code == 200:
+            image_data_base64 = response.json().get('image_data')
+            if image_data_base64:
+                print('Image successfully downloaded.')
+                image_data = base64.b64decode(image_data_base64)
+                lcd.image(175, 160, image_data)
+            else:
+                print('No image data received.')
+        else:
+            print('Image download failed. Response status : ' + str(response.status_code))
+    except Exception as e:
+        print('Failed to download image:', e)
+
+def download_humidity(image_name):
+    url = download_url + "?image_name=" + image_name
+    try:
+        response = urequests.get(url)
+        if response.status_code == 200:
+            image_data_base64 = response.json().get('image_data')
+            print('Image successfully downloaded.')
+            image_data = base64.b64decode(image_data_base64)
+            lcd.image(170, 60, image_data)
+        else:
+            print('Image download failed. Response status : ' + str(response.status_code))
+    except Exception as e:
+        print('Failed to download image:', e)
+
+def display_data(temperature, humidity, co2):
+    lcd.font(lcd.FONT_DejaVu24)
+    lcd.setTextColor(writing_color)
+    lcd.setCursor(70, 72)
+    lcd.print("°{:.1f}C".format(temperature))
+    lcd.setTextColor(writing_color)
+    lcd.setCursor(225, 70)
+    lcd.print("{:.1f}%".format(humidity))
+    lcd.font(lcd.FONT_DejaVu24)
+    lcd.setTextColor(writing_color)
+    lcd.setCursor(250, 165)
+    lcd.print("{} ".format(co2))
+    lcd.setCursor(250, 180)
+    lcd.print("ppm")
+
+def display_outside():
+    try:
+        current_weather_response = requests.get(get_api_data)
+        if current_weather_response.status_code == 200:
+            current_weather_data = current_weather_response.json()
+            weather_details = current_weather_data['weather']
+            temperature = weather_details['temperature']
+            icon_code = weather_details['icon']
+
+            # Afficher la température
+            lcd.setCursor(50, 175)
+            lcd.print("{:.1f}C".format(temperature))
+
+            icon_url = 'http://openweathermap.org/img/wn/{}.png'.format(icon_code)
+            response = requests.get(icon_url)
+            if response.status_code == 200:
+                with open('/flash/outside_icon.png', 'wb') as f:
+                    f.write(response.content)
+                lcd.image(0, 150, '/flash/outside_icon.png')
+            else:
+                print("Failed to download the image")
+        else:
+            print("Failed to fetch weather data")
+    except Exception as e:
+        print("Error:", e)
+
+def download_and_display():
+    lcd.clear()
+    get_date()
+    lcd.line(0, 30, 320, 30, lcd.WHITE)
+    download_thermo_house('thermo_house.png')
+    download_humidity('humidity.png')
+    download_co2('co2.png')
+    send_data()
+    display_outside()
+
+# Forecast for the page 3
+def get_forecast():
+    try:
+        response = requests.get(get_forecast_url)
+        if response.status_code == 200:
+            forecast_data = response.json()
+            response_city = requests.get(get_api_data)
+            city_name_data = response_city.json()
+            city_name = city_name_data['weather']['city_name']
+            forecasts = forecast_data['forecasts']
+            lcd.font(lcd.FONT_DejaVu18)
+            x_position = 80
+            lcd.setCursor(80, 45)
+            lcd.print("Forecast in {}".format(city_name))
+
+            for forecast in forecasts[:3]:
+                date = forecast['date']
+                min_temp = forecast['min_temperature']
+                max_temp = forecast['max_temperature']
+                min_humidity = forecast['min_humidity']
+                max_humidity = forecast['min_humidity']
+                min_wind_speed = forecast['min_wind_speed']
+                max_wind_speed = forecast['max_wind_speed']
+                description = forecast['description']
+                icon_code = forecast['icon']
+
+                lcd.font(lcd.FONT_Default)
+                lcd.setCursor(10, 120)
+                lcd.print("Date:")
+                lcd.setCursor(10, 150)
+                lcd.print("Temp:")
+                lcd.setCursor(10, 180)
+                lcd.print("Wind:")
+                lcd.setCursor(10, 210)
+                lcd.print("Humid:")
+
+                icon_url = 'http://openweathermap.org/img/wn/{}.png'.format(icon_code)
+                icon_response = requests.get(icon_url)
+                if icon_response.status_code == 200:
+                    icon_path = '/flash/outside_icon.png'
+                    with open(icon_path, 'wb') as f:
+                        f.write(icon_response.content)
+                        lcd.image(x_position, 70, icon_path)
+
+                lcd.font(lcd.FONT_Default)
+                lcd.setCursor(x_position, 120)
+                lcd.print(date)
+                lcd.setCursor(x_position, 150)
+                lcd.print("{:.2f}C".format(max_temp))
+                lcd.setCursor(x_position, 180)
+                lcd.print("{:.2f}km/h".format(max_wind_speed))
+                lcd.setCursor(x_position, 210)
+                lcd.print("{:.2f}%".format(max_humidity))
+
+                x_position += 75
+
+        else:
+            lcd.print("Failed to fetch forecast data")
+    except Exception as e:
+        lcd.print("Error fetching forecast: " + str(e))
+
+# Send data to BigQuery
+def send_data():
+    global sensor_data_cache
+    data = None
+    try:
+        temperature = env3.temperature
+        humidity = env3.humidity
+        co2_level = co2_sensor.eCO2
+        response_time = urequests.get(get_date_url)
+        response_json = response_time.json()
+        test_time = response_json['test_time']
+
+        data = {
+            'temperature': temperature,
+            'humidity': humidity,
+            'co2': co2_level,
+            'time': test_time
+        }
+
+        if wlan.isconnected():
+            while sensor_data_cache:
+                cached_data = sensor_data_cache.pop(0)
+                try:
+                    response = requests.post(upload_data, json=cached_data)
+                    if response.status_code != 200:
+                        sensor_data_cache.insert(0, cached_data)
+                        break
+                except:
+                    sensor_data_cache.insert(0, cached_data)
+                    break
+
+            try:
+                response = requests.post(upload_data, json=data)
+                if response.status_code == 200:
+                    display_data(data['temperature'], data['humidity'], data['co2'])
+                else:
+                    lcd.clear()
+                    lcd.setCursor(0, 0)
+                    lcd.print("Failed to send data!")
+                    sensor_data_cache.append(data)
+            except:
+                sensor_data_cache.append(data)
+                lcd.clear()
+                lcd.setCursor(0, 0)
+                lcd.print("Failed to send data!")
+        else:
+            sensor_data_cache.append(data)
+            lcd.clear()
+            lcd.setCursor(0, 0)
+            lcd.print("Data cached due to no connection")
+
+    except Exception as e:
+        lcd.clear()
+        lcd.setCursor(0, 0)
+        lcd.print("Failed to catch sensors")
+        if data:
+            sensor_data_cache.append(data)
+
+
+# Audio configuration
+def download_audio(url, file_path):
+    try:
+        response = urequests.get(url)
+        if response.status_code == 200:
+            # Décoder les données audio encodées en base64
+            audio_data_base64 = response.json().get('audio_data')
+            if audio_data_base64:
+                audio_data = base64.b64decode(audio_data_base64)
+                with open(file_path, 'wb') as f:
+                    f.write(audio_data)
+            else:
+                lcd.clear()
+                lcd.print("No audio data found", 0, 80)
+        else:
+            lcd.clear()
+            lcd.print("Failed to download audio", 0, 80)
+        response.close()
+    except Exception as e:
+        lcd.print("Error: " + str(e), 0, 120)
+
+while not connect_to_wifi():
+    lcd.clear()
+    lcd.print("Unable to connect to any WiFi network.")
+    time.sleep(10)
+
+# Page configuration
+pageIndex = 0
+last_refresh_time = time.ticks_ms()
+
+def page1():
+    lcd.clear()
+    lcd.setTextColor(writing_color)
+
+    # Afficher le titre
+    lcd.font(lcd.FONT_DejaVu24)
+    lcd.print("Meteo station", 10, 10)
+
+    # Afficher le sous-titre
+    lcd.font(lcd.FONT_DejaVu18)
+    lcd.print("Welcome!", 10, 40)
+
+    # Afficher la description de la station meteo
+    lcd.font(lcd.FONT_Default)
+    lcd.print("This weather station provides you with", 10, 70)
+    lcd.print("your home's internal weather information,", 10, 90)
+    lcd.print("and external temperature. As well as ", 10, 110)
+    lcd.print("outdoor weather forecasts for ", 10, 130)
+    lcd.print("the next few days. ", 10, 150)
+
+    lcd.font(lcd.FONT_DejaVu18)
+    lcd.print("Light system", 10, 180)
+    lcd.font(lcd.FONT_Default)
+    lcd.print("- Green: Good air quality", 10, 200)
+    lcd.print("- Red: Bad air quality", 10, 220)
+    set_led_color()
+
+def page2():
+    lcd.clear()
+    download_and_display()
+    lcd.line(0, 135, 320, 135, lcd.WHITE)
+    lcd.line(160, 30, 160, 240, lcd.WHITE)
+    set_led_color()
+
+def page3():
+    lcd.clear()
+    get_date()
+    lcd.line(0, 30, 320, 30, lcd.WHITE)
+    get_forecast()
+    set_led_color()
+
+pages = {
+    0: page1,
+    1: page2,
+    2: page3
+}
+
+def updateDisplay():
+    global last_refresh_time
+    if time.ticks_ms() - last_refresh_time > 300000:
+        pages[pageIndex]()
+        last_refresh_time = time.ticks_ms()
+
+def buttonA_wasPressed():
+    global pageIndex
+    pageIndex = 0
+    pages[pageIndex]()
+
+def buttonB_wasPressed():
+    global pageIndex
+    pageIndex = 1
+    pages[pageIndex]()
+
+def buttonC_wasPressed():
+    global pageIndex
+    pageIndex = 2
+    pages[pageIndex]()
+
+btnA.wasPressed(buttonA_wasPressed)
+btnB.wasPressed(buttonB_wasPressed)
+btnC.wasPressed(buttonC_wasPressed)
+
+pages[pageIndex]()
+
+# Initial audio download and play
+audio1 = '/flash/audio_0.wav'
+download_audio(audio_url + "?audio_name=audio_0.wav", audio1)
+speaker.playWAV(audio1, volume=5)
+last_play_time = time.time()
+cooldown_period = 600
+
+last_weather_update = time.time()
+weather_update_interval = 300
+
+while True:
+    check_wifi_connection()
+    current_time = time.time()
+    if pir.value() == 1 and (current_time - last_play_time > cooldown_period):
+        download_audio(audio_url + "?audio_name=audio_0.wav", audio1)
+        speaker.playWAV(audio1, volume=5)
+        last_play_time = current_time
+    if pageIndex == 1 and (current_time - last_weather_update > weather_update_interval):
+        download_and_display()
+        lcd.line(0, 135, 320, 135, lcd.WHITE)
+        lcd.line(160, 30, 160, 240, lcd.WHITE)
+        set_led_color()
+        last_weather_update = current_time
+    time.sleep(1)

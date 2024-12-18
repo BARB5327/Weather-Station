@@ -1,0 +1,12 @@
+streamlit
+requests
+pandas
+numpy
+pytz
+Pillow
+streamlit-autorefresh
+db-dtypes
+matplotlib
+seaborn
+pandas-gbq
+plotly
